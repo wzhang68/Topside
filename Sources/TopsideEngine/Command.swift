@@ -23,8 +23,9 @@ public struct CommandResult: Sendable {
 /// its pipes; with dozens of commands in flight GCD ran out of threads and
 /// the whole process stalled (the CI hang during M1).
 enum Command {
+    /// `timeout`: seconds after which the command is terminated (SIGTERM, then SIGKILL 2 s later).
     static func run(_ executable: String, _ arguments: [String], in directory: String? = nil,
-                    environment: [String: String]? = nil) async throws -> CommandResult {
+                    environment: [String: String]? = nil, timeout: Double? = nil) async throws -> CommandResult {
         let fm = FileManager.default
         let base = fm.temporaryDirectory.appendingPathComponent("topside-cmd-\(UUID().uuidString)")
         let outURL = base.appendingPathExtension("out")
@@ -51,6 +52,14 @@ enum Command {
             p.terminationHandler = { process in continuation.resume(returning: process.terminationStatus) }
             do {
                 try p.run()
+                if let timeout {
+                    let pid = p.processIdentifier
+                    DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                        guard p.isRunning else { return }
+                        kill(pid, SIGTERM)
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 2) { if p.isRunning { kill(pid, SIGKILL) } }
+                    }
+                }
             } catch {
                 p.terminationHandler = nil
                 continuation.resume(throwing: error)
