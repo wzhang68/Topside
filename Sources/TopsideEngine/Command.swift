@@ -13,47 +13,54 @@ public struct CommandResult: Sendable {
     }
 }
 
-final class Box<T>: @unchecked Sendable {
-    var value: T
-    init(_ value: T) { self.value = value }
-}
-
 /// Short-lived commands (git, prep commands). Agent processes do not go
 /// through here; they are detached by `ProcessSupervisor`.
+///
+/// No thread waits for anything: output goes to temporary files (not pipes,
+/// which need a reader to keep the child from blocking once 64 KB are
+/// buffered), and completion arrives through the termination handler. An
+/// earlier version parked one GCD thread per command while two more drained
+/// its pipes; with dozens of commands in flight GCD ran out of threads and
+/// the whole process stalled (the CI hang during M1).
 enum Command {
     static func run(_ executable: String, _ arguments: [String], in directory: String? = nil,
                     environment: [String: String]? = nil) async throws -> CommandResult {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: executable)
-                p.arguments = arguments
-                if let directory { p.currentDirectoryURL = URL(fileURLWithPath: directory) }
-                if let environment { p.environment = environment }
-                p.standardInput = FileHandle.nullDevice
-                let out = Pipe(), err = Pipe()
-                p.standardOutput = out
-                p.standardError = err
-                do {
-                    try p.run()
-                } catch {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                let o = Box(Data()), e = Box(Data())
-                let group = DispatchGroup()
-                group.enter()
-                DispatchQueue.global().async { o.value = out.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-                group.enter()
-                DispatchQueue.global().async { e.value = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-                group.wait()
-                p.waitUntilExit()
-                continuation.resume(returning: CommandResult(
-                    exitCode: p.terminationStatus,
-                    stdout: String(decoding: o.value, as: UTF8.self),
-                    stderr: String(decoding: e.value, as: UTF8.self)))
+        let fm = FileManager.default
+        let base = fm.temporaryDirectory.appendingPathComponent("topside-cmd-\(UUID().uuidString)")
+        let outURL = base.appendingPathExtension("out")
+        let errURL = base.appendingPathExtension("err")
+        fm.createFile(atPath: outURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        fm.createFile(atPath: errURL.path, contents: nil, attributes: [.posixPermissions: 0o600])
+        defer {
+            try? fm.removeItem(at: outURL)
+            try? fm.removeItem(at: errURL)
+        }
+        let out = try FileHandle(forWritingTo: outURL)
+        let err = try FileHandle(forWritingTo: errURL)
+
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: executable)
+        p.arguments = arguments
+        if let directory { p.currentDirectoryURL = URL(fileURLWithPath: directory) }
+        if let environment { p.environment = environment }
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = out
+        p.standardError = err
+
+        let status: Int32 = try await withCheckedThrowingContinuation { continuation in
+            p.terminationHandler = { process in continuation.resume(returning: process.terminationStatus) }
+            do {
+                try p.run()
+            } catch {
+                p.terminationHandler = nil
+                continuation.resume(throwing: error)
             }
         }
+        try? out.close()
+        try? err.close()
+        return CommandResult(exitCode: status,
+                             stdout: (try? String(contentsOf: outURL, encoding: .utf8)) ?? "",
+                             stderr: (try? String(contentsOf: errURL, encoding: .utf8)) ?? "")
     }
 
     /// A user-supplied command line (prep or verify), run by the login shell

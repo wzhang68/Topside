@@ -23,6 +23,15 @@ public enum SocketError: Error, CustomStringConvertible, Equatable {
 /// Requests and responses are capped so a broken peer cannot exhaust memory.
 let maxMessageBytes = 16 * 1024 * 1024
 
+/// Blocking socket I/O runs on its own thread, never on GCD's shared pool or
+/// Swift's cooperative pool: each call can block for up to its timeout, and
+/// many of them at once exhausted GCD's thread limit during M1 testing.
+func onOwnThread(_ body: @escaping @Sendable () -> Void) {
+    let thread = Thread(block: body)
+    thread.stackSize = 256 * 1024
+    thread.start()
+}
+
 func makeAddress(_ path: String) throws -> sockaddr_un {
     var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
@@ -135,7 +144,7 @@ public final class LineSocketServer: @unchecked Sendable {
             _ = fcntl(client, F_SETFD, FD_CLOEXEC)
             setTimeouts(client, seconds: 10)
             let handler = self.handler
-            DispatchQueue.global().async {
+            onOwnThread {
                 guard let request = readLine(client) else { close(client); return }
                 Task {
                     var response = await handler(request)
@@ -164,12 +173,12 @@ public final class LineSocketServer: @unchecked Sendable {
 }
 
 public enum LineSocketClient {
-    /// Async form of `request`. The blocking socket I/O runs on a GCD thread,
-    /// never on Swift's cooperative pool: a server handler in the same process
-    /// needs that pool to answer, and blocking it can deadlock.
+    /// Async form of `request`. The blocking I/O runs on its own thread, so it
+    /// cannot starve Swift's cooperative pool (which a server in the same
+    /// process needs to answer) or GCD's.
     public static func send(path: String, _ payload: Data, timeout: TimeInterval = 30) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global().async {
+            onOwnThread {
                 continuation.resume(with: Result { try request(path: path, payload, timeout: timeout) })
             }
         }
