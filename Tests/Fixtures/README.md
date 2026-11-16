@@ -32,8 +32,8 @@ Model: haiku. Hooks injected with `--settings`. Prompt (unless noted): run
 | `budget` | `--max-budget-usd 0.0005`, essay prompt | result `error_max_budget_usd`, exit code 1; spent 0.003 (limit is checked between calls) |
 | `followup` | `--resume` of the `allow` session | same session id, model remembers the earlier command |
 | `continue` | `--resume` of the `deny` session, told the user now approves | command ran: the "allow and continue" path |
-| `sigint` | SIGINT 12 s into `sleep 40` | exit 0, **no** `result` event |
-| `sigterm` | SIGTERM 12 s into `sleep 40` | exit 143 |
+| `sigint` | asked to run `sleep 40`; it backgrounded the command, ended its turn with a **success** result, then got SIGINT while waiting | exit 0 — looks like a normal finish from the output alone |
+| `sigterm` | same as `sigint`, with SIGTERM | exit 143, also a success result before the signal |
 
 ## Codex 0.169.0 (`codex/0.169.0/`)
 
