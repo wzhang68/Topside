@@ -4,10 +4,10 @@
 
 [简体中文](README.zh-CN.md)
 
-> **Status: early development, not usable yet.** The design is done and the
-> technical spikes (milestone M0) are complete. There is no app to install yet;
-> what exists today is a window prototype and the experiments behind the design.
-> See [Roadmap](#roadmap).
+> **Status: early development.** The task engine works from the command line
+> (milestone M1): dispatch Claude Code and Codex tasks from a terminal, each in its
+> own git worktree, and inspect the results. The notch island itself is the next
+> milestone; there is no app to install yet. See [Roadmap](#roadmap).
 
 ---
 
@@ -76,8 +76,8 @@ requests itself. The rules:
 
 | Agent | Status |
 |-------|--------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | planned for v1; headless runs, permission hooks and resume verified in M0 |
-| [Codex CLI](https://github.com/openai/codex) | planned for v1; headless runs, sandbox behaviour, resume and review verified in M0 |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | works from the CLI (M1); permission approvals come in M3 |
+| [Codex CLI](https://github.com/openai/codex) | works from the CLI (M1); runs in its `workspace-write` sandbox |
 | Others | each new agent needs one runner and a set of fixtures; contributions welcome after v1 |
 
 ## Roadmap
@@ -85,8 +85,8 @@ requests itself. The rules:
 | Milestone | What you can do at the end | Status |
 |-----------|----------------------------|--------|
 | M0 Technical spikes | — | **done** ([findings](docs/m0-findings.md), in Chinese) |
-| M1 Task engine | dispatch tasks from the command line (`topside run "…"`), each in its own worktree | next |
-| M2 Island and dispatch | shortcut → type → task appears on the island | |
+| M1 Task engine | dispatch tasks from the command line (`topside run "…"`), each in its own worktree | **done** |
+| M2 Island and dispatch | shortcut → type → task appears on the island | next |
 | M3 When it needs you | approve permissions and answer questions on the island | |
 | M4 Results and acceptance | result card, diff, follow-up, open PR, merge, discard | first daily-usable version |
 | M5 Recipes | implement-and-verify, plan-first, implement-and-review | |
@@ -97,13 +97,45 @@ Details: [development plan](docs/development-plan.md) (in Chinese).
 
 ## Try what exists today
 
-Requirements: macOS 14 or later, Xcode 15.3+ (Swift 5.10+).
+Requirements: macOS 14 or later, Xcode 16 or later (Swift 6).
 
-**Island window prototype** — fake data, no agents involved:
+### The task engine, from the command line
+
+Requires Claude Code and/or Codex, already logged in.
 
 ```bash
 git clone https://github.com/wzhang68/Topside.git
 cd Topside
+swift build -c release
+alias topside="$PWD/.build/release/topside"
+
+topside doctor                 # finds git, Claude Code and Codex
+topside serve                  # in its own terminal: runs the engine
+```
+
+In another terminal, inside any git repository:
+
+```bash
+topside run "Add a multiply(a, b) function to calc.py" --wait
+topside run "Write tests for the parser" --agent codex
+topside list                   # all tasks, most urgent first
+topside logs <id> --follow     # what the agent is doing
+topside show <id>              # result: changed files, cost, how to take over in a terminal
+topside discard <id>           # delete the worktree and branch
+```
+
+Each task runs in its own worktree under `~/.topside/worktrees` on a `topside/…`
+branch; your checkout is never touched. Agents keep running if you stop
+`topside serve`, and are picked up again when it restarts. Until M3, anything an
+agent would need your approval for is denied, and the result says how many times
+that happened. If a repository needs untracked files or a setup step in a fresh
+worktree: `topside repo --copy .env --prep "npm ci"`.
+
+### Island window prototype
+
+Fake data, no agents involved:
+
+```bash
 swift run --package-path Spikes/m0-window
 ```
 
@@ -118,6 +150,13 @@ throwaway repo and cost a few tenths of a cent each; their headers explain usage
 ## Repository layout
 
 ```
+Sources/
+  TopsideCore/          data model and task state machine (no agent names)
+  TopsideEngine/        processes, worktrees, persistence, scheduling
+  TopsideRunners/       Claude Code and Codex: command lines and event parsers
+  TopsideIPC/           Unix socket between the CLI and the engine
+  topside/              the command-line tool
+Tests/                  unit and integration tests; Fixtures/ holds recorded agent runs
 docs/
   design.md             design doc (Chinese)
   development-plan.md   milestones and tasks (Chinese)
@@ -131,9 +170,10 @@ Tests/Fixtures/         scrubbed recordings of real agent runs, for parser tests
 scripts/
   scrub-fixtures.py     make raw recordings safe to commit
   check-no-private-data.sh
+  fake-agent.sh         replays fixtures, so tests never call a model
 ```
 
-The product itself (Swift package and app) starts in M1.
+`swift test` runs everything without calling a model.
 
 ## Contributing
 

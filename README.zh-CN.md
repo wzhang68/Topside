@@ -4,8 +4,8 @@
 
 [English](README.md)
 
-> **状态：早期开发中，还不能使用。** 设计已完成，技术验证（里程碑 M0）已完成。
-> 目前没有可以安装的应用，只有一个窗口原型和支撑设计的验证代码。见[路线图](#路线图)。
+> **状态：早期开发中。** 任务引擎已经可以用命令行使用（里程碑 M1）：在终端里派 Claude Code 和 Codex 的任务，
+> 每个任务在自己的 git worktree 里运行，可以查看结果。刘海上的岛是下一个里程碑，目前还没有可以安装的应用。见[路线图](#路线图)。
 
 ---
 
@@ -55,8 +55,8 @@ Topside 启动的 agent 没有终端，所以权限请求必须由它来回答�
 
 | agent | 状态 |
 |-------|------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | v1 支持；无终端运行、权限 hook、恢复会话已在 M0 验证 |
-| [Codex CLI](https://github.com/openai/codex) | v1 支持；无终端运行、沙箱行为、恢复和复查已在 M0 验证 |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | 命令行可用（M1）；权限审批在 M3 |
+| [Codex CLI](https://github.com/openai/codex) | 命令行可用（M1）；在它的 `workspace-write` 沙箱里运行 |
 | 其他 | 每接入一个新 agent 只需要一个运行器和一组夹具；v1 之后欢迎贡献 |
 
 ## 路线图
@@ -64,8 +64,8 @@ Topside 启动的 agent 没有终端，所以权限请求必须由它来回答�
 | 里程碑 | 结束时能做什么 | 状态 |
 |--------|----------------|------|
 | M0 技术验证 | — | **已完成**（[验证结论](docs/m0-findings.md)） |
-| M1 任务引擎 | 在命令行里派任务（`topside run "…"`），每个任务在自己的 worktree 里 | 下一个 |
-| M2 岛与派活 | 快捷键 → 输入 → 任务出现在岛上 | |
+| M1 任务引擎 | 在命令行里派任务（`topside run "…"`），每个任务在自己的 worktree 里 | **已完成** |
+| M2 岛与派活 | 快捷键 → 输入 → 任务出现在岛上 | 下一个 |
 | M3 需要你的时刻 | 在岛上批准权限、回答问题 | |
 | M4 结果与验收 | 结果卡片、diff、追加指令、开 PR、合入、丢弃 | 第一个可以日常使用的版本 |
 | M5 配方 | 实现并验证、先计划、实现并复查 | |
@@ -76,13 +76,40 @@ Topside 启动的 agent 没有终端，所以权限请求必须由它来回答�
 
 ## 现在能试什么
 
-要求：macOS 14 或更高，Xcode 15.3 或更高（Swift 5.10 或更高）。
+要求：macOS 14 或更高，Xcode 16 或更高（Swift 6）。
 
-**岛的窗口原型**，用的是假数据，不涉及 agent：
+### 用命令行运行任务引擎
+
+需要已经装好并登录 Claude Code 或 Codex（至少一个）。
 
 ```bash
 git clone https://github.com/wzhang68/Topside.git
 cd Topside
+swift build -c release
+alias topside="$PWD/.build/release/topside"
+
+topside doctor                 # 检查 git、Claude Code、Codex
+topside serve                  # 在单独的终端里运行引擎
+```
+
+在另一个终端里，进入任意一个 git 仓库：
+
+```bash
+topside run "给 calc.py 加一个 multiply(a, b) 函数" --wait
+topside run "为解析器写测试" --agent codex
+topside list                   # 所有任务，最紧急的在前
+topside logs <id> --follow     # agent 正在做什么
+topside show <id>              # 结果：改了哪些文件、花费、如何在终端里接管
+topside discard <id>           # 删除 worktree 和分支
+```
+
+每个任务都在 `~/.topside/worktrees` 下自己的 worktree 里、在 `topside/…` 分支上运行，不会碰你的工作目录。停掉 `topside serve` 后 agent 会继续运行，重新启动时自动接上。在 M3 之前，agent 需要你批准的操作一律被拒绝，结果里会写明被拒了几次。如果仓库在新的 worktree 里需要未跟踪的文件或准备步骤：`topside repo --copy .env --prep "npm ci"`。
+
+### 岛的窗口原型
+
+用的是假数据，不涉及 agent：
+
+```bash
 swift run --package-path Spikes/m0-window
 ```
 
@@ -93,6 +120,13 @@ swift run --package-path Spikes/m0-window
 ## 仓库结构
 
 ```
+Sources/
+  TopsideCore/          数据模型和任务状态机（不出现 agent 的名字）
+  TopsideEngine/        进程、worktree、持久化、调度
+  TopsideRunners/       Claude Code 和 Codex 的命令行与事件解析
+  TopsideIPC/           命令行和引擎之间的 Unix socket
+  topside/              命令行工具
+Tests/                  单元测试和集成测试；Fixtures/ 是录下的真实 agent 运行
 docs/
   design.md             设计文档
   development-plan.md   里程碑和任务
@@ -106,9 +140,10 @@ Tests/Fixtures/         真实 agent 运行的脱敏录制，用于解析器测�
 scripts/
   scrub-fixtures.py     把原始录制处理成可以提交的夹具
   check-no-private-data.sh
+  fake-agent.sh         回放夹具，测试从不调用模型
 ```
 
-产品本身（Swift 包和应用）从 M1 开始。
+`swift test` 会运行全部测试，不调用任何模型。
 
 ## 参与贡献
 
