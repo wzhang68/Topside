@@ -86,7 +86,7 @@ requests itself. The rules:
 |-----------|----------------------------|--------|
 | M0 Technical spikes | — | **done** ([findings](docs/m0-findings.md), in Chinese) |
 | M1 Task engine | dispatch tasks from the command line (`topside run "…"`), each in its own worktree | **done** |
-| M2 Island and dispatch | shortcut → type → task appears on the island | next |
+| M2 Island and dispatch | shortcut → type → task appears on the island | in progress |
 | M3 When it needs you | approve permissions and answer questions on the island | |
 | M4 Results and acceptance | result card, diff, follow-up, open PR, merge, discard | first daily-usable version |
 | M5 Recipes | implement-and-verify, plan-first, implement-and-review | |
@@ -131,18 +131,27 @@ agent would need your approval for is denied, and the result says how many times
 that happened. If a repository needs untracked files or a setup step in a fresh
 worktree: `topside repo --copy .env --prep "npm ci"`.
 
-### Island window prototype
+### The app (M2, in progress)
 
-Fake data, no agents involved:
+Requires [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```bash
-swift run --package-path Spikes/m0-window
+xcodegen generate --spec App/project.yml
+xcodebuild -project App/Topside.xcodeproj -scheme Topside -derivedDataPath .build/xcode build
+open .build/xcode/Build/Products/Debug/Topside.app
 ```
 
-A black pill appears at the top centre of your main screen (around the notch, if
-it has one). Hover to expand it. Press **⌥ Space** (Option + Space) to open the
-dispatch field; Return or Esc closes it and gives focus back to the app you were
-in. Quit with the button in the expanded view, or Ctrl-C in the terminal.
+The app runs the engine itself, so stop `topside serve` first; the `topside`
+commands then talk to the app. The island sits at the top centre of your main
+screen (around the notch, if it has one) and shows how many tasks are running,
+failed or ready. Hover or click it for the task list; **⌥ Space** opens the
+dispatch box (`@` picks a repository, or drag a folder onto the island);
+**⌃⌥ Space** opens the list from the keyboard. The menu bar icon has the same
+commands. Quitting the app does not stop running agents.
+
+To try the interface without calling a model, `scripts/demo-island.sh` starts
+the app against a throwaway data directory with fake agents and dispatches 30
+tasks (`scripts/demo-island.sh --stop` cleans up).
 
 The other spikes in `Spikes/` drive real Claude Code and Codex runs in a
 throwaway repo and cost a few tenths of a cent each; their headers explain usage.
@@ -155,7 +164,9 @@ Sources/
   TopsideEngine/        processes, worktrees, persistence, scheduling
   TopsideRunners/       Claude Code and Codex: command lines and event parsers
   TopsideIPC/           Unix socket between the CLI and the engine
+  TopsideUIModel/       what the island shows, without AppKit: notch geometry, list order, launcher
   topside/              the command-line tool
+App/                    the macOS app: project.yml (XcodeGen), windows and SwiftUI views
 Tests/                  unit and integration tests; Fixtures/ holds recorded agent runs
 docs/
   design.md             design doc (Chinese)
@@ -171,6 +182,7 @@ scripts/
   scrub-fixtures.py     make raw recordings safe to commit
   check-no-private-data.sh
   fake-agent.sh         replays fixtures, so tests never call a model
+  demo-island.sh        the app with 30 fake tasks, for interface work
 ```
 
 `swift test` runs everything without calling a model.
