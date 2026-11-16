@@ -1,6 +1,6 @@
 # Topside 设计文档
 
-> 状态：Draft v0.3 · 2026-11-15
+> 状态：Draft v0.4 · 2026-11-15（已按 M0 结果更新）
 > 项目名：Topside（2026-11-15 定）。
 > v0.3 的变化：产品方向从“会话状态栏”改为“任务指挥台”，全文重写。v0.2 的方案与 CodeIsland 高度重合，已放弃。
 
@@ -100,7 +100,7 @@
 |---|------|----------------|------------|
 | Q1 | 项目的正式名字 | 暂用代号 | 公开仓库之前 |
 | Q2 | 许可证 | MIT | 公开仓库之前 |
-| Q3 | 你日常用哪个终端和编辑器（影响“接管到终端”和“在编辑器中打开”先支持谁） | iTerm2、VS Code | M4 之前 |
+| Q3 | 你日常用哪个编辑器（影响“在编辑器中打开”先支持谁）。终端已知是 Ghostty（M0 录制中 `TERM_PROGRAM=ghostty`），“接管到终端”优先支持它 | VS Code | M4 之前 |
 | Q5 | 是否提供“跳过所有权限确认”的档位 | 不提供（见 8.4） | M3 |
 
 ### 本机实测到的事实
@@ -108,7 +108,8 @@
 - macOS 15.6，Swift 6.2，Xcode 26.3。机器有刘海，但当前主屏是没有刘海的外接显示器，所以**无刘海屏幕上的形态是一等公民**。
 - Claude Code 2.1.325。`claude --help` 里有本设计依赖的参数：`-p`、`--output-format stream-json`、`--input-format stream-json`、`--session-id`、`--resume`、`--settings`、`--permission-mode`、`--permission-prompt-tool`、`--allowedTools`、`--max-budget-usd`。另有 `--worktree` 和 `--bg`。
 - Codex 0.169.0。`codex exec --help` 里有 `--json`、`-C`、`-s`（沙箱模式）、`--worktree`、`--approve-for-me`，以及 `resume`、`fork`、`review` 子命令。`hooks` 特性是 stable 且已启用。
-- 这些参数**存在**是确认过的。它们的**行为细节**（事件流的字段、无终端模式下权限请求怎么处理）还没有实测，是 M0 的任务。
+- 这些参数的行为细节在 M0 实测过，结果见 `docs/m0-findings.md`，影响设计的部分已写进第 8 节。
+- PATH 里排在前面的 git 是 2.16.2，系统自带的 `/usr/bin/git` 是 2.50.1（见 8.2）。
 
 ## 5. 核心概念
 
@@ -405,10 +406,18 @@ runs/<n>/meta.json        pid、进程启动时间、命令行、agent 会话 id
 | 启动 | `claude -p <提示词> --output-format stream-json --session-id <uuid>` | `codex exec --json -C <工作区> <提示词>` |
 | 追加指令 | 加 `--resume <会话 id>` | `codex exec resume <会话 id> <提示词>` |
 | 只读运行 | `--permission-mode` 的计划模式 | `-s read-only` |
-| 复查 | 只读运行加复查提示词 | `codex exec review` |
+| 复查 | 只读运行加复查提示词 | `codex exec review --base <基线分支>` |
 | 注入每次运行的配置 | `--settings <文件>` | `-c key=value` |
-| 费用上限 | `--max-budget-usd` | 待查 |
+| 费用上限 | `--max-budget-usd`（软上限，见下） | 没有对应参数 |
+| 费用和用量 | `result` 里的 `total_cost_usd` | 只有 token 数，`review` 时为 0 |
 | 接管到终端 | 在工作区里执行 `claude --resume <会话 id>` | `codex resume <会话 id>` |
+
+以上参数和行为在 M0 实测过（详见 `docs/m0-findings.md`）。实测中发现、实现时必须处理的几点：
+
+- **一步是否完成，看进程是否退出。** Claude Code 的子 agent 在后台运行时，一次运行会输出两个 `result`：第一个在子 agent 完成之前。
+- **中断由 Topside 自己记录。** Claude Code 被 SIGINT 中断时退出码是 0 且没有 `result`，无法从输出判断。信号是 Topside 发的，它记下这一点即可。
+- **Claude Code 的费用上限是软上限。** 它在两次模型调用之间检查，会超出一次调用的量。界面上称为“费用上限（约）”。
+- **Codex 的 `--json` 不包含所有工具调用。** 通过 `exec` 脚本工具执行的命令只出现在 Codex 的会话文件里。v1 只读 `--json`，界面上不假装知道它没报告的活动。
 
 每种 agent 实现一个运行器：
 
@@ -431,21 +440,28 @@ protocol AgentRunner {
 - 应用重启后，根据 `meta.json` 里的 pid 和进程启动时间确认进程身份（防止 pid 被复用），然后从文件上次读到的位置继续读。
 - 事件流天然有完整记录，可以用来排查问题和做回放测试。
 
-没有采用两个 CLI 自带的 `--worktree` 和 Claude Code 的 `--bg`，是为了让两种 agent 的行为由岛统一控制。M0 会评估 `--bg` 是否值得用。
+没有采用两个 CLI 自带的 `--worktree` 和 Claude Code 的 `--bg`，是为了让两种 agent 的行为由岛统一控制。M0 验证了自己管理进程可行（脱离、重新接上、中断、子进程清理），不需要 `--bg`。
 
 ### 8.2 工作区管理
 
 **创建。** `git worktree add <路径> -b topside/<任务短名> <基线提交>`。路径默认在 `~/.topside/worktrees/<仓库名>/<任务短名>`，可在设置里改。基线默认是派活时仓库当前分支的 HEAD。
 
-**准备。** 新的 worktree 里没有未被 git 跟踪的文件（`.env`、`node_modules` 等），很多项目因此跑不起来。每个仓库可以在设置里配置三项，都是可选的：
+**选择 git。** Topside 不直接用 PATH 里的 `git`：用户机器上可能有很旧的版本（M0 的测试机上 PATH 里是 2016 年代的 2.16，不支持 `git worktree remove`）。启动时依次检查 `/usr/bin/git`、`xcrun --find git`、PATH 里的 git，选第一个不低于 2.25 的，并在设置里显示所用的路径和版本。agent 在 worktree 里自己调用旧版 git 不受影响，M0 验证过。
+
+**准备。** 新的 worktree 里没有未被 git 跟踪的文件（`.env`、`node_modules`、构建缓存等），很多项目因此跑不起来，或者第一次构建很慢。每个仓库可以在设置里配置以下几项，都是可选的：
 
 | 配置 | 作用 | 例子 |
 |------|------|------|
 | 要复制的文件 | 从主工作目录复制到 worktree | `.env`、`.env.local` |
+| 要克隆的目录 | 用 APFS 写时复制（`cp -c`）把目录瞬间克隆到 worktree，几乎不占额外空间。只适用于不含绝对路径的目录 | `node_modules` |
 | 准备命令 | 在 worktree 创建后运行一次 | `npm ci` |
 | 验证命令 | `shell` 验证步骤使用 | `npm test` |
 
-第一次对某个仓库派活时，岛会提示这三项可以配置，也可以跳过。
+“要克隆的目录”不能通用：M0 里克隆 SwiftPM 的 `.build` 后构建失败，因为它的缓存里写死了绝对路径。设置界面上对常见目录给出提示。
+
+第一次对某个仓库派活时，岛会提示这些可以配置，也可以跳过。
+
+**改动统计。** 在 worktree 里用一个临时索引计算（`GIT_INDEX_FILE` 指向临时文件，`read-tree HEAD` 后 `add -A`，再 `diff --cached --numstat <基线>`）。这样能同时统计已提交、未提交和未跟踪的文件，并且遵守 `.gitignore`，又不会动 worktree 真正的索引。
 
 **清理。** 岛不会自动删除任何 worktree 或分支。只有“丢弃”“保留分支”“合入”这些你明确点击的动作会删除 worktree。设置里有一个列表显示所有由岛创建的 worktree 和它们占用的空间，可以手动清理已关闭任务留下的。
 
@@ -494,7 +510,11 @@ hook 的配置通过每次运行的 `--settings`（Claude Code）或 `-c`（Code
 - **显示完整内容。** 批准前显示完整的命令或文件路径，过长时可以展开，不做会隐藏关键部分的截断。
 - **不建立第二套长期规则。** “允许”只对这一次请求生效。想要长期放行某类命令，在 agent 自己的权限配置里设置。
 
-**需要 M0 验证的：** 无终端模式下 hook 是否触发、能阻塞多久；Claude Code 这边还有 `--permission-prompt-tool` 和 `--input-format stream-json` 两种替代机制，三者里选最可靠的；Codex 这边 hook 的信任机制在 `exec` 模式下如何处理，`--approve-for-me` 的确切含义。**如果某个 agent 无法实现“阻塞等待你的决定”，它在 v1 里退化为“预先允许的命令之外一律拒绝，被拒后任务停下等你”，功能仍然可用，只是多一次往返。**
+**M0 的验证结果：**
+
+- **Claude Code：已验证。** 无终端模式下 `PermissionRequest` hook 会触发，可以阻塞等待（已测 150 秒），超时和不表态都是拒绝。被拒后用 `--resume` 告知“用户已批准”，agent 会重新执行，“允许并继续”成立。不采用 `--permission-prompts host`，因为它要求宿主一直持有 agent 的管道，与进程脱离冲突。
+- **Codex：hook 需要用户信任一次。** Codex 只运行信任过的 hook（按内容哈希记录）。Topside 的 hook 命令固定在应用包里，内容不变，所以理论上信任一次即可长期有效；这一点和“按次注入的 hook 能否被信任”还在验证。**Topside 不使用 `--dangerously-bypass-hook-trust`**：它会让仓库自带的未信任 hook 一起运行，对不可信仓库派活时等于执行仓库作者的任意命令。
+- **Codex 的保底方案：只靠沙箱。** 用户没有信任 hook 时，Codex 以 `workspace-write` 运行，越界操作直接失败（M0 验证：不会发起审批，也不会被自动审核器放行）。任务照常完成，结果卡片里列出被沙箱阻止的操作（从 agent 的回复中识别）。这时岛上不会出现 Codex 的审批请求，设置里提示“信任 Topside 的 hook 后可在岛上审批”。
 
 ### 8.5 结果的计算
 
@@ -579,6 +599,9 @@ hook 的配置通过每次运行的 `--settings`（Claude Code）或 `-c`（Code
 |------|--------|------|------|
 | 无终端模式下，权限请求无法阻塞等待用户 | 中 | 高 | M0 比较三种机制。保底方案见 8.4 末尾，功能可用但多一次往返 |
 | agent 事件流的格式与预期不符，或随版本变化 | 高 | 中 | M0 录制真实事件流做夹具；解析对未知内容宽容；夹具按 agent 版本分目录 |
+| Codex 的 `--json` 漏报部分工具调用，岛上的活动显示不完整 | 已发生 | 中 | v1 如实显示已知的；以后可选读取 Codex 的会话文件（内部格式，需按版本适配） |
+| 用户没有在 Codex 里信任 Topside 的 hook | 高 | 中 | 只靠沙箱的保底方案已验证安全；引导里说明信任的好处；岛上提示 |
+| 新 worktree 冷构建慢，派活的等待时间长 | 高 | 中 | 每仓库可选的“要克隆的目录”；准备命令期间任务显示为“正在准备工作区”，不占用你的注意力 |
 | worktree 里项目跑不起来（缺依赖、缺环境文件） | 高 | 高 | 每仓库的复制文件和准备命令（8.2）；首次派活时引导配置；始终提供“原地”模式 |
 | 无人值守的 agent 做了破坏性的事 | 低 | 高 | 默认拒绝的权限模型；不提供全局跳过；Codex 沙箱保持开启；文档说明隔离边界 |
 | 不限并发时，大量任务同时运行耗尽额度、触发限流或拖慢机器 | 中 | 中 | 岛上始终显示运行数；“全部暂停”；单任务费用上限；可选的并发上限（默认关闭）；限流导致的失败如实显示并可重试 |
