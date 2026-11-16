@@ -36,8 +36,15 @@ print(json.dumps({"hooks": hooks}, indent=2))
 EOF
 
 prompt=${SPIKE_PROMPT:-"Use the Bash tool to run exactly this command: touch created_by_agent.txt. Then reply with the single word DONE. Do not do anything else."}
-sid=$(uuidgen | tr 'A-Z' 'a-z')
-echo "$sid" > "$out/session-id"
+# SPIKE_RESUME=<session id> continues an existing session instead of starting one.
+if [ -n "${SPIKE_RESUME:-}" ]; then
+  session_args=(--resume "$SPIKE_RESUME")
+  echo "$SPIKE_RESUME" > "$out/session-id"
+else
+  sid=$(uuidgen | tr 'A-Z' 'a-z')
+  session_args=(--session-id "$sid")
+  echo "$sid" > "$out/session-id"
+fi
 
 cd "$SPIKE_REPO"
 rm -f created_by_agent.txt
@@ -54,7 +61,7 @@ env -u CLAUDECODE -u CLAUDE_CODE_ENTRYPOINT -u CLAUDE_CODE_MESSAGING_SOCKET \
     --model haiku \
     --output-format stream-json --verbose --include-hook-events \
     --settings "$out/settings.json" \
-    --session-id "$sid" \
+    "${session_args[@]}" \
     --max-budget-usd 0.10 \
     "$@" \
     < /dev/null > "$out/events.raw.jsonl" 2> "$out/stderr.log"
