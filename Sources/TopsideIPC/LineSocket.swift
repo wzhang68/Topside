@@ -147,12 +147,17 @@ public final class LineSocketServer: @unchecked Sendable {
         }
     }
 
+    /// Stop listening and remove the socket file, but only if this server bound
+    /// it: a server that failed to start (e.g. because another one is already
+    /// listening on the path) must not delete the other server's socket.
     public func stop() {
-        lock.withLock {
-            source?.cancel()
-            source = nil
+        let wasListening = lock.withLock { () -> Bool in
+            defer { source = nil }
+            guard let s = source else { return false }
+            s.cancel()
+            return true
         }
-        unlink(path)
+        if wasListening { unlink(path) }
     }
 
     deinit { stop() }

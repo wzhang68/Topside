@@ -42,7 +42,13 @@ private func socketPath() -> String { "/tmp/topside-test-\(UUID().uuidString.pre
         let path = socketPath()
         let first = LineSocketServer(path: path) { $0 }
         try first.start()
-        #expect(throws: SocketError.alreadyRunning(path)) { try LineSocketServer(path: path) { $0 }.start() }
+        do {
+            let second = LineSocketServer(path: path) { $0 }
+            #expect(throws: SocketError.alreadyRunning(path)) { try second.start() }
+            second.stop()
+        }   // and deinit
+        // The refused server must not have removed the running server's socket.
+        #expect(LineSocketClient.isListening(path))
         first.stop()
 
         // A leftover socket file with nobody listening must not block a new server.
