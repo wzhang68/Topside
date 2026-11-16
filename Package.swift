@@ -5,6 +5,7 @@ let package = Package(
     name: "Topside",
     platforms: [.macOS(.v14)],
     products: [
+        .executable(name: "topside", targets: ["topside"]),
         .library(name: "TopsideEngine", targets: ["TopsideEngine"]),
         .library(name: "TopsideRunners", targets: ["TopsideRunners"]),
     ],
@@ -17,11 +18,14 @@ let package = Package(
         .target(name: "TopsideEngine", dependencies: ["TopsideCore", "TopsideIPC"]),
         // One runner per agent: command lines and event-stream parsers.
         .target(name: "TopsideRunners", dependencies: ["TopsideCore"]),
+        // Command-line entry point.
+        .executableTarget(name: "topside",
+                          dependencies: ["TopsideCore", "TopsideEngine", "TopsideRunners", "TopsideIPC"]),
 
         .testTarget(name: "TopsideCoreTests", dependencies: ["TopsideCore"]),
         .testTarget(name: "TopsideIPCTests", dependencies: ["TopsideIPC"]),
+        .testTarget(name: "TopsideRunnersTests", dependencies: ["TopsideRunners", "TopsideCore"]),
         .testTarget(name: "TopsideEngineTests",
                     dependencies: ["TopsideEngine", "TopsideRunners", "TopsideCore"]),
-        .testTarget(name: "TopsideRunnersTests", dependencies: ["TopsideRunners", "TopsideCore"]),
     ]
 )
