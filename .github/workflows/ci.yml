@@ -39,9 +39,17 @@ jobs:
         if: always()
         run: scripts/ci-test-report.sh test.log
 
-      - name: No agent names in TopsideCore or TopsideEngine
+      - name: Build the app
+        timeout-minutes: 15
         run: |
-          if grep -rn -i -E "claude|codex" Sources/TopsideCore Sources/TopsideEngine; then
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate --spec App/project.yml
+          xcodebuild -project App/Topside.xcodeproj -scheme Topside -configuration Debug \
+            -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build -quiet
+
+      - name: No agent names in TopsideCore, TopsideEngine or TopsideUIModel
+        run: |
+          if grep -rn -i -E "claude|codex" Sources/TopsideCore Sources/TopsideEngine Sources/TopsideUIModel; then
             echo "Agent-specific code belongs in TopsideRunners."
             exit 1
           fi
