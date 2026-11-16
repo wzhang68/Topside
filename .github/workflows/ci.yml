@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the private-data check scans the whole history
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+      - name: No agent names in TopsideCore or TopsideEngine
+        run: |
+          if grep -rn -i -E "claude|codex" Sources/TopsideCore Sources/TopsideEngine; then
+            echo "Agent-specific code belongs in TopsideRunners."
+            exit 1
+          fi
+
+      - name: No private data
+        run: |
+          scripts/check-no-private-data.sh
+          scripts/check-no-private-data.sh --history
