@@ -1,0 +1,15 @@
+# SwiftPM / Xcode
+.build/
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+
+# Raw, unscrubbed recordings from real agent runs never go in the repo.
+# Only scrubbed fixtures under Tests/Fixtures/ are committed.
+Spikes/**/recordings/
+*.raw.jsonl
+
+# macOS
+.DS_Store
