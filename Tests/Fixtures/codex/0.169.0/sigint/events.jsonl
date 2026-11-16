@@ -1,0 +1,4 @@
+{"type": "thread.started", "thread_id": "01a1e34c-8fa9-7181-8035-451c52a315c3"}
+{"type": "turn.started"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": "I’ll run the requested shell command and report when it finishes."}}
+{"type": "item.started", "item": {"id": "item_1", "type": "command_execution", "command": "/bin/zsh -lc 'sleep 40 && echo finished'", "aggregated_output": "", "exit_code": null, "status": "in_progress"}}

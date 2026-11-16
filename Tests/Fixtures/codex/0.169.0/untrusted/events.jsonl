@@ -1,0 +1,7 @@
+{"type": "thread.started", "thread_id": "01a1e33a-a78e-77f2-95a7-4b8f5ba1dd2a"}
+{"type": "item.completed", "item": {"id": "item_0", "type": "error", "message": "clamping SessionEnd hook timeout to 3s in /<session-flags>/config.toml"}}
+{"type": "turn.started"}
+{"type": "item.started", "item": {"id": "item_1", "type": "command_execution", "command": "/bin/zsh -lc 'touch <TMP>/scratchpad/m0/outside_repo.txt'", "aggregated_output": "", "exit_code": null, "status": "in_progress"}}
+{"type": "item.completed", "item": {"id": "item_1", "type": "command_execution", "command": "/bin/zsh -lc 'touch <TMP>/scratchpad/m0/outside_repo.txt'", "aggregated_output": "", "exit_code": 0, "status": "completed"}}
+{"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "DONE"}}
+{"type": "turn.completed", "usage": {"input_tokens": 40404, "cached_input_tokens": 32512, "cache_write_input_tokens": 0, "output_tokens": 80, "reasoning_output_tokens": 0}}
