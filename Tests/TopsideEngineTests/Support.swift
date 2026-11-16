@@ -91,7 +91,9 @@ func parentPID(of pid: Int32) -> Int32? {
 
 /// Poll until `condition` holds for the task, or fail after `timeout` seconds.
 @discardableResult
-func waitFor(_ engine: TaskEngine, _ id: TaskID, timeout: Double = 15, _ what: String = "condition",
+/// Timeouts are generous on purpose: they only matter when something is wrong, and
+/// CI machines (or a busy laptop) can be several times slower than a quiet one.
+func waitFor(_ engine: TaskEngine, _ id: TaskID, timeout: Double = 60, _ what: String = "condition",
              _ condition: @escaping @Sendable (TopsideTask) -> Bool) async throws -> TopsideTask {
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
@@ -102,7 +104,7 @@ func waitFor(_ engine: TaskEngine, _ id: TaskID, timeout: Double = 15, _ what: S
     throw TestError("Timed out waiting for \(what); task is \(String(describing: t?.status)) \(t?.failure?.message ?? "")")
 }
 
-func settled(_ engine: TaskEngine, _ id: TaskID, timeout: Double = 20) async throws -> TopsideTask {
+func settled(_ engine: TaskEngine, _ id: TaskID, timeout: Double = 60) async throws -> TopsideTask {
     try await waitFor(engine, id, timeout: timeout, "settled") { $0.status.isSettled }
 }
 
