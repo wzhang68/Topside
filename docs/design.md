@@ -448,7 +448,7 @@ protocol AgentRunner {
 
 ### 8.2 工作区管理
 
-**创建。** `git worktree add <路径> -b topside/<任务短名> <基线提交>`。路径默认在 `~/.topside/worktrees/<仓库名>/<任务短名>`，可在设置里改。基线默认是派活时仓库当前分支的 HEAD。
+**创建。** `git worktree add <路径> -b topside/<任务短名> <基线提交>`。路径默认在 `~/.topside/worktrees/<仓库名>/<任务短名>`，可在设置里改。基线默认是派活时仓库当前分支的 HEAD。仓库还没有任何提交时（刚 `git init`），改用 `git worktree add --orphan -b topside/<任务短名> <路径>`（需要 git 2.42），基线是空树，改动统计时 `read-tree --empty` 代替 `read-tree HEAD`。
 
 **选择 git。** Topside 不直接用 PATH 里的 `git`：用户机器上可能有很旧的版本（M0 的测试机上 PATH 里是 2018 年的 2.16，不支持 `git worktree remove`）。启动时依次检查 `/usr/bin/git`、`/opt/homebrew/bin/git`、PATH 里的 git，选第一个不低于 2.25 的，并显示所用的路径和版本（`topside doctor`）。agent 在 worktree 里自己调用旧版 git 不受影响，M0 验证过。
 

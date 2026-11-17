@@ -53,10 +53,17 @@ public struct WorkspaceManager: Sendable {
     public func prepare(_ task: TopsideTask, log: URL) async throws -> WorkspaceInfo {
         let repo = task.repo
         let base: String
-        do {
-            base = try await git.trimmed(["rev-parse", "--verify", "HEAD^{commit}"], in: repo)
-        } catch {
-            throw WorkspaceError(message: "The repository has no commits yet; Topside needs a commit to branch from.")
+        var unborn = false
+        if let head = try? await git.trimmed(["rev-parse", "--verify", "HEAD^{commit}"], in: repo) {
+            base = head
+        } else {
+            // Straight after `git init` there is no commit to branch from. Start
+            // from the empty tree: changes are then measured against nothing.
+            guard (try? await git.trimmed(["rev-parse", "--git-dir"], in: repo)) != nil else {
+                throw WorkspaceError(message: "\(repo) is not inside a git repository.")
+            }
+            base = try await git.trimmed(["hash-object", "-t", "tree", "/dev/null"], in: repo)
+            unborn = true
         }
 
         if task.mode == .inPlace {
@@ -69,10 +76,17 @@ public struct WorkspaceManager: Sendable {
         let branch = Self.branchPrefix + slug
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
                                                 withIntermediateDirectories: true)
+        if unborn && !git.supportsOrphanWorktrees {
+            throw WorkspaceError(message: "The repository has no commits yet. Make a first commit, or use git 2.42 or newer "
+                                 + "(found \(git.version)), or run the task in place.")
+        }
+        // An empty repository gets an orphan branch: it starts with no files and no history.
+        let add = unborn ? ["worktree", "add", "--quiet", "--orphan", "-b", branch, path]
+                         : ["worktree", "add", "--quiet", "-b", branch, path, base]
         do {
             let git = self.git
             _ = try await repoQueues.run(repo) {
-                try await git.run(["worktree", "add", "--quiet", "-b", branch, path, base], in: repo)
+                try await git.run(add, in: repo)
             }
         } catch let e as GitError {
             throw WorkspaceError(message: "Could not create the worktree.", detail: e.detail)
@@ -126,7 +140,10 @@ public struct WorkspaceManager: Sendable {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("topside-index-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: tmp) }
         let env = ["GIT_INDEX_FILE": tmp.path]
-        try await git.run(["read-tree", "HEAD"], in: info.path, extraEnvironment: env)
+        // No commit yet (a repository straight after `git init`): start from an empty index.
+        if (try? await git.run(["read-tree", "HEAD"], in: info.path, extraEnvironment: env)) == nil {
+            try await git.run(["read-tree", "--empty"], in: info.path, extraEnvironment: env)
+        }
         try await git.run(["add", "-A"], in: info.path, extraEnvironment: env)
         let out = try await git.run(["diff", "--cached", "--numstat", "--no-renames", "-z", info.baseCommit],
                                     in: info.path, extraEnvironment: env)

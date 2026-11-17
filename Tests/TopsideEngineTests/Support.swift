@@ -46,17 +46,18 @@ struct Sandbox {
     let data: URL
     let worktrees: URL
 
-    init() throws {
+    /// `commits: false`: a repository straight after `git init`, with no commit yet.
+    init(commits: Bool = true) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("topside-tests-\(UUID().uuidString.prefix(8))")
         let repoURL = root.appendingPathComponent("my-repo")
         try FileManager.default.createDirectory(at: repoURL, withIntermediateDirectories: true)
         repo = repoURL.standardizedFileURL.path
         data = root.appendingPathComponent("data")
         worktrees = root.appendingPathComponent("worktrees")
-        try sh("""
+        try sh(commits ? """
             git init -q && printf 'hello\\n' > README.md && printf '.env\\n' > .gitignore && \
             git add . && git -c user.name=t -c user.email=t@localhost commit -qm init
-            """, in: repo)
+            """ : "git init -q", in: repo)
     }
 
     func engine(_ fake: [String: String] = [:], maxConcurrent: Int? = nil) throws -> TaskEngine {

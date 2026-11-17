@@ -15,6 +15,11 @@ public struct Git: Sendable {
     public let version: String
     let environment: [String: String]
 
+    /// `git worktree add --orphan`, for repositories with no commits yet (git 2.42).
+    var supportsOrphanWorktrees: Bool {
+        !version.split(separator: ".").compactMap { Int($0) }.lexicographicallyPrecedes([2, 42])
+    }
+
     public static func locate(searchPath: String? = ProcessInfo.processInfo.environment["PATH"],
                               environment: [String: String] = ProcessInfo.processInfo.environment) throws -> Git {
         var candidates = ["/usr/bin/git", "/opt/homebrew/bin/git"]

@@ -117,6 +117,34 @@ import TopsideRunners
         #expect(try box.mainCheckout() == before)
     }
 
+    /// A repository straight after `git init`: isolated tasks get an orphan
+    /// branch, and changes are measured against the empty tree.
+    @Test func repositoryWithNoCommitsYet() async throws {
+        let box = try Sandbox(commits: false)
+        defer { box.cleanup() }
+        let engine = try box.engine(["FAKE_AGENT_FIXTURE": Paths.claudeAllow, "FAKE_AGENT_WRITE": "data.json"])
+        await engine.start()
+
+        let t = try await settled(engine, try await engine.submit(TaskRequest(prompt: "x", repo: box.repo,
+                                                                              agent: .claudeCode)).id)
+        #expect(t.status == .ready, "\(t.failure?.message ?? "")")
+        let ws = try #require(t.workspace)
+        #expect(ws.branch?.hasPrefix("topside/") == true)
+        #expect(t.result?.files == [FileChange(path: "data.json", added: 2, deleted: 0)])
+        // The user's checkout is still empty, still without a commit.
+        #expect(try sh("git status --porcelain", in: box.repo).isEmpty)
+        #expect((try? sh("git rev-parse --verify -q HEAD", in: box.repo)) == nil)
+
+        try await engine.discard(t.id)
+        #expect(!FileManager.default.fileExists(atPath: ws.path))
+        #expect(try sh("git worktree list --porcelain | grep -c '^worktree' || true", in: box.repo) == "1")
+
+        let inPlace = try await settled(engine, try await engine.submit(
+            TaskRequest(prompt: "y", repo: box.repo, agent: .claudeCode, mode: .inPlace)).id)
+        #expect(inPlace.status == .ready, "\(inPlace.failure?.message ?? "")")
+        #expect(inPlace.result?.files == [FileChange(path: "data.json", added: 2, deleted: 0)])
+    }
+
     @Test func discardWhileRunningStopsTheAgentFirst() async throws {
         let box = try Sandbox()
         defer { box.cleanup() }
