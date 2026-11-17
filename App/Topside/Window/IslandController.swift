@@ -95,6 +95,10 @@ final class IslandController: IslandWindow {
         hotKeys.register(id: 2, keyCode: kVK_Space, modifiers: optionKey | controlKey, name: "⌃⌥Space") { [weak self] in
             self?.toggleList()
         }
+        // Quitting leaves agents running; the next launch re-attaches to them.
+        hotKeys.register(id: 3, keyCode: kVK_ANSI_Q, modifiers: optionKey, name: "⌥Q") {
+            NSApp.terminate(nil)
+        }
         if !hotKeys.unavailable.isEmpty {
             model.show("快捷键被其他应用占用：\(hotKeys.unavailable.joined(separator: "、"))")
         }
@@ -265,6 +269,11 @@ final class IslandController: IslandWindow {
         if let editor = panel.firstResponder as? NSTextView, editor.hasMarkedText() { return false }
         if keyCode == kVK_Escape {
             escape()
+            return true
+        }
+        // The app has no main menu, so ⌘Q would otherwise go nowhere.
+        if keyCode == kVK_ANSI_Q && mods == .command {
+            NSApp.terminate(nil)
             return true
         }
         guard model.mode == .launcher else { return false }

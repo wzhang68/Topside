@@ -46,7 +46,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             guard let self else { return }
             NSWorkspace.shared.open(self.model.host.dataDirectory)
         })
-        menu.addItem(action("退出 Topside", key: "q", modifiers: [.command]) { NSApp.terminate(nil) })
+        menu.addItem(action("退出 Topside", key: "q", modifiers: [.option]) { NSApp.terminate(nil) })
     }
 
     private func disabled(_ title: String) -> NSMenuItem {

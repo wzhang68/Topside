@@ -88,7 +88,7 @@ struct LauncherView: View {
             if let message = model.launcherMessage {
                 Text(message).foregroundStyle(message.hasPrefix("已派出") ? .green : .orange)
             } else {
-                Text("↩ 派出   ⌘↩ 派出并继续   ⇧↩ 换行   @ 选仓库   ⇥ 切换选项   Esc 取消")
+                Text("↩ 派出   ⌘↩ 派出并继续   ⇧↩ 换行   @ 选仓库   ⇥ 切换选项   Esc 取消   ⌥Q 退出")
                     .foregroundStyle(.gray)
             }
         }
