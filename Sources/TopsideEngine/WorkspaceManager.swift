@@ -41,6 +41,11 @@ public struct WorkspaceManager: Sendable {
 
     public static let branchPrefix = "topside/"
 
+    /// Author of the one commit Topside itself makes (see `prepare`), so it
+    /// works without the user's git identity configured.
+    static let topsideIdentity = ["GIT_AUTHOR_NAME": "Topside", "GIT_AUTHOR_EMAIL": "topside@localhost",
+                                  "GIT_COMMITTER_NAME": "Topside", "GIT_COMMITTER_EMAIL": "topside@localhost"]
+
     /// The repository's top-level directory, or an error if `path` is not in a git repository.
     public func repositoryRoot(of path: String) async throws -> String {
         do {
@@ -52,7 +57,7 @@ public struct WorkspaceManager: Sendable {
 
     public func prepare(_ task: TopsideTask, log: URL) async throws -> WorkspaceInfo {
         let repo = task.repo
-        let base: String
+        var base: String
         var unborn = false
         if let head = try? await git.trimmed(["rev-parse", "--verify", "HEAD^{commit}"], in: repo) {
             base = head
@@ -76,13 +81,21 @@ public struct WorkspaceManager: Sendable {
         let branch = Self.branchPrefix + slug
         try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
                                                 withIntermediateDirectories: true)
-        if unborn && !git.supportsOrphanWorktrees {
-            throw WorkspaceError(message: "The repository has no commits yet. Make a first commit, or use git 2.42 or newer "
-                                 + "(found \(git.version)), or run the task in place.")
+        let add: [String]
+        if unborn && git.supportsOrphanWorktrees {
+            // An empty repository gets an orphan branch: no files and no history.
+            add = ["worktree", "add", "--quiet", "--orphan", "-b", branch, path]
+        } else {
+            if unborn {
+                // Before git 2.42 (e.g. Xcode 16's git 2.39) there is no --orphan:
+                // branch from an empty commit made for the purpose. It is on no
+                // branch of the user's; only the task's branch starts from it.
+                let out = try await git.run(["commit-tree", base, "-m", "Empty starting point (Topside)"], in: repo,
+                                            extraEnvironment: Self.topsideIdentity)
+                base = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            add = ["worktree", "add", "--quiet", "-b", branch, path, base]
         }
-        // An empty repository gets an orphan branch: it starts with no files and no history.
-        let add = unborn ? ["worktree", "add", "--quiet", "--orphan", "-b", branch, path]
-                         : ["worktree", "add", "--quiet", "-b", branch, path, base]
         do {
             let git = self.git
             _ = try await repoQueues.run(repo) {

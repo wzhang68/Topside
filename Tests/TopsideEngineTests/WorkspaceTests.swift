@@ -33,6 +33,33 @@ import TopsideCore
         #expect(try sh("git status --porcelain untracked.txt", in: box.repo) == "?? untracked.txt")
     }
 
+    /// Before git 2.42 there is no `worktree add --orphan`: a repository with no
+    /// commits gets an empty starting commit that is on none of the user's branches.
+    @Test func noCommitsYetWithGitOlderThan242() async throws {
+        let box = try Sandbox(commits: false)
+        defer { box.cleanup() }
+        let real = try Git.locate()
+        let old = Git(executable: real.executable, version: "2.39.5", environment: real.environment)
+        #expect(!old.supportsOrphanWorktrees)
+        let manager = WorkspaceManager(git: old, worktreesRoot: box.worktrees, environment: ProcessInfo.processInfo.environment)
+        let log = box.root.appendingPathComponent("prep.log")
+
+        let ws = try await manager.prepare(TopsideTask(prompt: "x", repo: box.repo, agent: .claudeCode), log: log)
+        let branch = try #require(ws.branch)
+        #expect(try sh("git log --format=%an:%s \(branch)", in: ws.path) == "Topside:Empty starting point (Topside)")
+        #expect(try sh("git ls-tree -r \(ws.baseCommit)", in: box.repo).isEmpty)
+        // The user's checkout still has no commit and no other branch.
+        #expect((try? sh("git rev-parse --verify -q HEAD", in: box.repo)) == nil)
+        #expect(try sh("git branch --list", in: box.repo).contains(branch))
+
+        try sh("printf '1\\n1\\n' > data.json", in: ws.path)
+        #expect(try await manager.changeSet(ws) == [FileChange(path: "data.json", added: 2, deleted: 0)])
+
+        try await manager.remove(ws, repo: box.repo)
+        #expect(!FileManager.default.fileExists(atPath: ws.path))
+        #expect(try sh("git branch --list", in: box.repo).isEmpty)
+    }
+
     @Test func refusesToRemoveAnythingItDidNotCreate() async throws {
         let box = try Sandbox()
         defer { box.cleanup() }
